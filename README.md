@@ -13,8 +13,7 @@ TFRecords, etc. etc..
 Dependencies
 ===
 
-Everything is in the usual requirements.txt file. The only complication might be with
-[PyAudio](https://people.csail.mit.edu/hubert/pyaudio/).
+Just numpy for now...
 
 Install
 ===
