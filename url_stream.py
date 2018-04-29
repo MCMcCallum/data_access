@@ -1,9 +1,14 @@
 
+
 # Python standard library imports
 import os.path
 import urllib.parse as urlparse
 from abc import abstractmethod
 
+
+# TODO [matthew.mccallum 04.22.18]: At the moment the streams returned are just arbitrary objects, such a "file". I
+# should really define an abstract interface to the returned streams to include at least read(), write(), and close().
+# Perhaps this base class should also be a context manager, to allow "with" type statements.
 
 class URLScheme(object):
     """
