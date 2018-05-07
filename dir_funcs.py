@@ -9,19 +9,19 @@ A little module for inspecting directories.
 import os
 
 
-def get_audio_filenames(audio_dir, exts=['.wav', '.mp3']):
+def get_filenames(dirname, exts=['.wav', '.mp3']):
     """
     Gets all filenames with a given extension in a directory.
 
     Args:
-        audio_dir: str - A string containing the path to a directory to be analyzed.
+        dirname: str - A string containing the path to a directory to be analyzed.
 
         exts: list(str) - A list of strings describing the extensions of all files to be returned.
 
     Return:
         list(str) - A list of paths to files that were found.
     """
-    audio_files = os.listdir(audio_dir)
-    audio_files = [fname for fname in audio_files if os.path.splitext(fname)[1] in exts]
-    audio_files = [os.path.join(audio_dir, fname) for fname in audio_files]
-    return audio_files
+    all_files = os.listdir(dirname)
+    all_files = [fname for fname in all_files if os.path.splitext(fname)[1] in exts]
+    all_files = [os.path.join(dirname, fname) for fname in all_files]
+    return all_files
