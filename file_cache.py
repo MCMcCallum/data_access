@@ -87,34 +87,36 @@ class FileCache(object):
             total_size = 0
             for ind, filename in enumerate(self._all_files):
                 self._all_sizes[ind] = os.path.getsize(filename)
-                total_size += self._all_sizes
+                total_size += self._all_sizes[ind]
 
             # Separate into cache groups.
             num_groups = int(math.ceil(total_size/size))
             size_per_group = total_size/num_groups
             filename_index = 0
-            self._cache_groups = [[]]*num_groups
-            for group in self._cache_groups:
+            self._cache_groups = []
+            for group_index in range(num_groups):
                 this_size = 0
-                while this_size + self._all_sizes[filename_index] < size_per_group:
+                self._cache_groups += [[]]
+                group = self._cache_groups[-1]
+                while (filename_index < len(self._all_files)) and (this_size + self._all_sizes[filename_index] < size_per_group):
                     group += [self._all_files[filename_index]]
                     this_size += self._all_sizes[filename_index]
+                    filename_index += 1
                 random.shuffle(group)
 
             # Initialise member variables
             self._cache_a = os.path.join(self._cache_dir, 'a')
             self._cache_b = os.path.join(self._cache_dir, 'b')
-            self._current_group = len(self._cache_groups)
+            self._current_group = len(self._cache_groups)-1
             self._current_cache = self._cache_a
 
         # Prepare the next cache.
         self.PrepareNextCache()
 
-    def __del__(self):
+    def SaveState(self):
         """
-        Destructor.
-
-        Saves the current state of the cache for next time, to prevent having to prefill the cache a second time.
+        Saves the current state of the cache to file, in case it needs to be used next time - to prevent having 
+        to prefill the cache a second time.
         """
         metadata = {
             '_all_files': self._all_files,
@@ -125,7 +127,7 @@ class FileCache(object):
             '_cache_a': self._cache_a,
             '_cache_b': self._cache_b
         }
-        with open(os.path.join(self._cache_dir, self.CACHE_METADATA_FNAME), 'rb') as metadata_file:
+        with open(os.path.join(self._cache_dir, self.CACHE_METADATA_FNAME), 'wb') as metadata_file:
             pickle.dump(metadata, metadata_file, pickle.HIGHEST_PROTOCOL)
 
     @property
@@ -174,7 +176,7 @@ class FileCache(object):
             arg: bool or Exception: The return value from an asynchronous process. Either a success / fail value or an
             exception.
         """
-        if issubclass(arg, Exception):
+        if isinstance(arg, Exception):
             self._currently_caching = False
             raise arg
         elif arg:
@@ -218,3 +220,5 @@ class FileCache(object):
         self._current_group = self._next_group
         self.PrepareNextCache()
 
+        # We have just switched to a fresh, fully prepared cache. This is a good time to save state.
+        self.SaveState()
