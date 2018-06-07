@@ -16,6 +16,7 @@ import multiprocessing
 import random
 import pickle
 import logging
+import copy
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class FileCache(object):
             ext: str - Extension of the files to be cached, including the '.' prefix.
         """
         # Initialise member variables
-        self._pool = multiprocessing.Pool(1)
+        self._pool = None
         self._cache_dir = to_dir
         self._currently_caching = False
         self._cache_a = None
@@ -79,10 +80,13 @@ class FileCache(object):
                 self._cache_a = metadata['_cache_a']
                 self._cache_b = metadata['_cache_b']
 
+            # NOTE: It is up to the user of this class to prepare the next cache, in this scenario, i.e., if one is already prepared.
+
         else:
 
             # Get all filenames and their sizes
-            self._all_files = get_filenames(from_dir, ext)
+            self._all_files = get_filenames(from_dir, [ext])
+            random.shuffle(self._all_files)
             self._all_sizes = [0]*len(self._all_files)
             total_size = 0
             for ind, filename in enumerate(self._all_files):
@@ -102,16 +106,15 @@ class FileCache(object):
                     group += [self._all_files[filename_index]]
                     this_size += self._all_sizes[filename_index]
                     filename_index += 1
-                random.shuffle(group)
 
             # Initialise member variables
             self._cache_a = os.path.join(self._cache_dir, 'a')
             self._cache_b = os.path.join(self._cache_dir, 'b')
-            self._current_group = len(self._cache_groups)-1
+            self._current_group = len(self._cache_groups)   # Set to out of range index to indicate no current group
             self._current_cache = self._cache_a
 
-        # Prepare the next cache.
-        self.PrepareNextCache()
+            # Prepare the next cache.
+            self.PrepareNextCache()
 
     def SaveState(self):
         """
@@ -138,7 +141,25 @@ class FileCache(object):
         Return:
             int - Index of the next group to be cached, or that is currently caching.
         """
-        return (self._current_group + 1) % len(self._cache_groups)
+        # An out of range current_group implies no groups are cached, start at 0.
+        if self._current_group==len(self._cache_groups):
+            return 0
+        else:
+            return (self._current_group + 1) % len(self._cache_groups)
+
+    @property
+    def current_files(self):
+        """
+        Returns all files accessible in the current cache.
+        
+        Return:
+            list(str) - A list of files safe for reading, that are in the cache currently.
+        """
+        # An out of range current_group implies no groups are cached.
+        if self._current_group==len(self._cache_groups):
+            return []
+        else:
+            return [os.path.join(self._current_cache, os.path.basename(fname)) for fname in self._cache_groups[self._current_group]]
 
     @staticmethod
     def _copy_set(file_list, directory):
@@ -190,7 +211,7 @@ class FileCache(object):
         This preparation is performed asynchronously in a background process.
         """
         logger.info("Peparing cache group at index: " + str(self._next_group))
-
+        self._pool = multiprocessing.Pool(1, maxtasksperchild=1)
         self._currently_caching = True
         # Copy all files to cache in another process
         if self._current_cache != self._cache_a: new_cache = self._cache_a
@@ -199,6 +220,7 @@ class FileCache(object):
                                (self._cache_groups[self._next_group], new_cache),
                                callback=self._copy_callback,
                                error_callback=self._copy_callback)
+        self._pool.close()
 
     def IsCaching(self):
         """
