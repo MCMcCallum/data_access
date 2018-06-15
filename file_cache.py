@@ -33,7 +33,7 @@ class FileCache(object):
 
     CACHE_METADATA_FNAME = ".cache.pkl"
 
-    def __init__(self, from_dir, to_dir, size, ext):
+    def __init__(self, from_dir, to_dir, ext, size):
         """
         Constructor.
 
@@ -44,10 +44,14 @@ class FileCache(object):
             to_dir: str - URL to the cache location which groups of files less than size will be copied over two. As the
             cache requires two groups at this location, this location must have storage space of at least 2*size.
 
-            size: int - Size in bytes of each cache group. Two of these groups are copied to 'to_dir' simultaneously.
-
             ext: str - Extension of the files to be cached, including the '.' prefix.
+        
+            size: int - Size in bytes of each cache group. Two of these groups are copied to 'to_dir' simultaneously. If
+            None, then the whole file repo is copied across.
         """
+        if not size:
+            size = 1024*1024*1024*1024*1024 # 1 petabyte should be bigger than this class ever has to deal with.
+
         # Initialise member variables
         self._pool = None
         self._cache_dir = to_dir
