@@ -33,7 +33,7 @@ class FileCache(object):
 
     CACHE_METADATA_FNAME = ".cache.pkl"
 
-    def __init__(self, from_dir, to_dir, ext, size):
+    def __init__(self, from_dir, to_dir, ext, size=None):
         """
         Constructor.
 
