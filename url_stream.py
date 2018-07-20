@@ -1,14 +1,20 @@
+"""
+Created by Matt C. McCallum
+"""
 
+
+# Local imports
+# None.
+
+# Third party imports
+import boto3
 
 # Python standard library imports
 import os.path
 import urllib.parse as urlparse
 from abc import abstractmethod
+import io
 
-
-# TODO [matthew.mccallum 04.22.18]: At the moment the streams returned are just arbitrary objects, such a "file". I
-# should really define an abstract interface to the returned streams to include at least read(), write(), and close().
-# Perhaps this base class should also be a context manager, to allow "with" type statements.
 
 class URLScheme(object):
     """
@@ -77,8 +83,99 @@ class FileScheme(URLScheme):
         return open(parsed.path, permission)
 
 
+class S3Scheme(URLScheme):
+    """
+    A scheme defining operations writing to or reading from s3.
+    """
+
+    TYPE = 's3'
+
+    def GetStream(self, permission):
+        """
+        Gets an context manager type object that can be read from or written to depending
+        on the permissions. This specifically will read from or write to an s3 location.
+
+        Note: This is intended to be used exclusively with context managers.
+
+        Args:
+            permission - str - A permission specifying either binary reading from or writing
+            to an s3 location. Currently only binary reads and writes are supported.
+        """
+        parsed = urlparse.urlparse(self._url)
+        s3_key = parsed.path[1:]
+        s3_bucket = parsed.netloc
+        if permission == 'rb':
+            s3 = boto3.client('s3')
+            data = io.BytesIO()
+            s3.download_fileobj(s3_bucket, s3_key, data)
+            data.seek(0)
+            return data
+        elif permission == 'wb':
+            print('Returning writer')
+            return S3Writer(s3_bucket, s3_key)
+        else:
+            raise TypeError('Incorrect permission for s3 file')
+
+
+class S3Writer(object):
+    """
+    A context managed S3 file handle type object that may be written to.
+
+    Currently, the file is prepared in memory in a bytes IO stream and then uploaded
+    to S3 on the exit of the context.
+    This provides only one write call, but has its limitations due to RAM availability.
+    """
+
+    def __init__(self, bucket, key):
+        """
+        Constructor.
+        
+        Args:
+            bucket -> str - Name of the AWS S3 Bucket.
+
+            key -> str - Essentially the S3 path and filename.
+        """
+        self._s3_bucket = bucket
+        self._s3_key = key
+    
+    def write(self, data):
+        """
+        Write to the in memory data buffer in preparation for writing to S3.
+        Note this adheres to the file write interface and can be used in place
+        of files, for example as an argument to pickle.dump(...).
+
+        Args:
+            data -> Bytes - A bytes object containing the data to write to S3.
+        """
+        self._data.write(data)
+
+    def __enter__(self):
+        """
+        Start the context. This simply opens an empty byte stream and returns itself
+        for writing to.
+
+        Return:
+            S3Writer - This object, for writing to.
+        """
+        self._data = io.BytesIO()
+        return self
+
+    def __exit__(self, *exc):
+        """
+        Close the context - That is, upload to S3.
+
+        Args:
+            exc -> tuple(type, value, traceback) - Any excpetion that occured during the
+            context. Currently this is not handled in any way.
+        """
+        s3 = boto3.client('s3')
+        self._data.seek(0)
+        s3.upload_fileobj(self._data, self._s3_bucket, self._s3_key)
+
+
 _schemes = [
-    FileScheme
+    FileScheme,
+    S3Scheme
 ]
 
 
