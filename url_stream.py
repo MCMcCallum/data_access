@@ -266,3 +266,17 @@ def get_size(url):
     """
     the_scheme = get_scheme(url)
     return the_scheme.GetSize()
+
+
+def copy_url(from_url, dest_url):
+    """
+    Copy file from one url to another.
+
+    Args:
+        from_url -> str - The url of the file to copy from.
+
+        dest_url -> str - The url to copy the file to.
+    """
+    with get_stream(from_url, 'rb') as from_stream:
+        with get_stream(dest_url, 'wb') as to_stream:
+            to_stream.write(from_stream.read())
