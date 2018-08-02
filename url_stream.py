@@ -90,6 +90,19 @@ class S3Scheme(URLScheme):
 
     TYPE = 's3'
 
+    def __init__(self, url):
+        """
+        Constructor.
+
+        Args:
+            url: str - The absolute url path with any scheme, network location etc. defined.
+
+        """
+        super().__init__(url)
+        parsed = urlparse.urlparse(self._url)
+        self._s3_key = parsed.path[1:]
+        self._s3_bucket = parsed.netloc
+
     def GetStream(self, permission):
         """
         Gets an context manager type object that can be read from or written to depending
@@ -101,18 +114,14 @@ class S3Scheme(URLScheme):
             permission - str - A permission specifying either binary reading from or writing
             to an s3 location. Currently only binary reads and writes are supported.
         """
-        parsed = urlparse.urlparse(self._url)
-        s3_key = parsed.path[1:]
-        s3_bucket = parsed.netloc
         if permission == 'rb':
             s3 = boto3.client('s3')
             data = io.BytesIO()
-            s3.download_fileobj(s3_bucket, s3_key, data)
+            s3.download_fileobj(self._s3_bucket, self._s3_key, data)
             data.seek(0)
             return data
         elif permission == 'wb':
-            print('Returning writer')
-            return S3Writer(s3_bucket, s3_key)
+            return S3Writer(self._s3_bucket, self._s3_key)
         else:
             raise TypeError('Incorrect permission for s3 file')
 
