@@ -63,6 +63,16 @@ class URLScheme(object):
         """
         raise NotImplementedError
 
+    @abstractmethod
+    def GetSize(self):
+        """
+        Gets the size of the file this scheme object refers to, in bytes.
+
+        Return:
+            int - The size of the file this url points to.
+        """
+        raise NotImplementedError
+
 
 class FileScheme(URLScheme):
     """
@@ -77,11 +87,20 @@ class FileScheme(URLScheme):
 
         Return:
             IOBase - A stream object for reading from.
-
         """
         parsed = urlparse.urlparse(self._url)
         return open(parsed.path, permission)
 
+    def GetSize(self):
+        """
+        Gets the size of the file this scheme object refers to, in bytes.
+
+        Return:
+            int - The size of the file this url points to.
+        """
+        parsed = urlparse.urlparse(self._url)
+        return os.path.getsize(parsed.path)
+        
 
 class S3Scheme(URLScheme):
     """
@@ -96,7 +115,6 @@ class S3Scheme(URLScheme):
 
         Args:
             url: str - The absolute url path with any scheme, network location etc. defined.
-
         """
         super().__init__(url)
         parsed = urlparse.urlparse(self._url)
@@ -124,6 +142,17 @@ class S3Scheme(URLScheme):
             return S3Writer(self._s3_bucket, self._s3_key)
         else:
             raise TypeError('Incorrect permission for s3 file')
+
+    def GetSize(self):
+        """
+        Gets the size of the file this scheme object refers to, in bytes.
+
+        Return:
+            int - The size of the file this url points to.
+        """
+        s3 = boto3.client('s3')
+        response = s3.head_object(Bucket=self._s3_bucket, Key=self._s3_key)
+        return response['ContentLength']
 
 
 class S3Writer(object):
@@ -188,16 +217,13 @@ _schemes = [
 ]
 
 
-def get_stream(url, permission):
+def get_scheme(url):
     """
-    Helper factory function - gets a read stream for a given URL.
+    Factory function for constructing schemes from URLs.
 
     Args:
-        url: str - The absolute url path with any scheme, network location etc. defined.
-
-    Return:
-            IOBase - A stream object for reading from.
-
+        url -> str - The URL this stream refers to. If no scheme is specified a local file
+        is assumed.
     """
     # If no scheme in url, assume local file.
     parsed = urlparse.urlparse(url)
@@ -211,5 +237,32 @@ def get_stream(url, permission):
             the_scheme = scheme(url)
             break
 
-    # Return the stream for the url.
+    return the_scheme
+
+
+def get_stream(url, permission):
+    """
+    Helper factory function - gets a read stream for a given URL.
+
+    Args:
+        url -> str - The absolute url path with any scheme, network location etc. defined.
+
+    Return:
+        IOBase - A stream object for reading from or writing to.
+    """
+    the_scheme = get_scheme(url)
     return the_scheme.GetStream(permission)
+
+
+def get_size(url):
+    """
+    Get the size of a file at a given URL.
+
+    Args:
+        url -> str - The URL to the file we want the size of.
+
+    Return:
+            int - The size of the file this url points to.
+    """
+    the_scheme = get_scheme(url)
+    return the_scheme.GetSize()
