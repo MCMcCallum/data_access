@@ -3,7 +3,7 @@ Created 05-26-18 by Matthew C. McCallum
 """
 
 # Local imports
-from .dir_funcs import get_filenames
+# None. 
 
 # Third party imports
 # None.
@@ -33,7 +33,7 @@ class FileCache(object):
 
     CACHE_METADATA_FNAME = ".cache.pkl"
 
-    def __init__(self, from_dir, to_dir, ext, size=None):
+    def __init__(self, from_urls, to_dir, size=None):
         """
         Constructor.
 
@@ -89,7 +89,7 @@ class FileCache(object):
         else:
 
             # Get all filenames and their sizes
-            self._all_files = get_filenames(from_dir, [ext])
+            self._all_files = from_urls
             random.shuffle(self._all_files)
             self._all_sizes = [0]*len(self._all_files)
             total_size = 0
@@ -232,19 +232,20 @@ class FileCache(object):
         """
         return self._currently_caching
 
-    def SwitchCache(self):
+    def Update(self):
         """
-        This will switch over to the next cache, assuming it is ready, and start preparing the cache after that.
+        This will switch over to the next cache, if it is ready, and start preparing the cache after that.
+        If the next cache is not ready, no action will be taken.
         """
-        logger.info("Moving to next cache at index: " + str(self._next_group))
+        if not self.IsCaching():
+            logger.info("Moving to next cache at index: " + str(self._next_group))
+            print('Next Cache!')
 
-        if self.IsCaching():
-            raise Exception  # Can't switch caches if we are currently preparing a cache.
-        if self._current_cache != self._cache_a: self._current_cache = self._cache_a
-        else: self._current_cache = self._cache_b
-        self._currently_caching = True
-        self._current_group = self._next_group
-        self.PrepareNextCache()
+            if self._current_cache != self._cache_a: self._current_cache = self._cache_a
+            else: self._current_cache = self._cache_b
+            self._currently_caching = True
+            self._current_group = self._next_group
+            self.PrepareNextCache()
 
-        # We have just switched to a fresh, fully prepared cache. This is a good time to save state.
-        self.SaveState()
+            # We have just switched to a fresh, fully prepared cache. This is a good time to save state.
+            self.SaveState()
