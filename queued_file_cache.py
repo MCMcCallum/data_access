@@ -82,6 +82,7 @@ class QueuedFileCache(object):
         self._next_cache_lock = threading.Lock()
         self._cache_dir = to_dir
         self._stop_signal = True
+        self._currently_caching = False
 
         # Check if we already have the cache information saved
         metadata_filename = os.path.join(to_dir, self._CACHE_METADATA_FNAME)
@@ -215,6 +216,7 @@ class QueuedFileCache(object):
         """
         if isinstance(arg, Exception):
             self._stop_signal = True
+            self._currently_caching = False
             raise arg
         elif arg:
             # If files were successfully cached, update the buffers, and start the next one.
@@ -231,8 +233,11 @@ class QueuedFileCache(object):
             if not self._stop_signal:
                 caching_thread = threading.Thread(target=self.PrepareNextCacheBlock)
                 caching_thread.start()
+            else:
+                self._currently_caching = False
         else:
             self._stop_signal = True
+            self._currently_caching = False
             raise Exception  # arg = False should indicate unsuccessful caching, but this does not currently occur.
 
     def PrepareNextCacheBlock(self):
@@ -262,6 +267,7 @@ class QueuedFileCache(object):
         while new_size + self.size > self._max_size:
             time.sleep(5)
             if self._stop_signal:
+                self._currently_caching = False
                 return
 
         # Set off an update in another process.
@@ -283,8 +289,17 @@ class QueuedFileCache(object):
         Start the caching process.
         """
         self._stop_signal = False
+        self._currently_caching = True
         caching_thread = threading.Thread(target=self.PrepareNextCacheBlock)
         caching_thread.start()
+
+    def IsCaching(self):
+        """
+        Whether this class is in the caching loop, either:
+            a) Waiting for more space to continue caching
+            b) Copying over files to the spare cache space
+        """
+        return self._currently_caching
 
     def Update(self):
         """
@@ -292,15 +307,24 @@ class QueuedFileCache(object):
         """
         logger.info("Moving the next cache block on board.")
 
+        # Add all the newly copied cache updates
+        print("Adding " + str(len(self._next_cache_update)) + " files to cache.")
         self._next_cache_lock.acquire()
         for i in range(len(self._next_cache_update)):
             self._current_cache.append(self._next_cache_update.popleft())
-            os.remove(self._local_fname(self._current_cache[0].fname, self._cache_dir))
-            self._used_cache.append(self._current_cache.popleft())
-
-        # We have just updated the cache. This is a good time to save state.
-        self.SaveState()
-
-        # Release the lock to let other stuff continue.
         self._next_cache_lock.release()
 
+        # Reduce the size of the cache by removing the oldest files until we are within the allowed cache size
+        removed_file_count = 0
+        while self.active_size > self._cache_size:
+            removed_file_count += 1
+            self._next_cache_lock.acquire()
+            os.remove(self._local_fname(self._current_cache[0].fname, self._cache_dir))
+            self._used_cache.append(self._current_cache.popleft())
+            self._next_cache_lock.release()
+        print("Removed " + str(removed_file_count) + " files from cache.")
+
+        # We have just updated the cache. This is a good time to save state.
+        self._next_cache_lock.acquire()
+        self.SaveState()
+        self._next_cache_lock.release()        
