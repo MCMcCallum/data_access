@@ -65,6 +65,8 @@ class QueuedFileCache(object):
             increment_size: int - The maximum total size of files that may be prepared before they are officially added
             to the cache.
         """
+        # TODO [matt.c.mccallum 08.25.18]: Make the cache directory if it does not already exist!
+
         if not cache_size:
             cache_size = 1024*1024*1024*1024*1024 # 1 petabyte should be bigger than this class ever has to deal with.
         if not increment_size:
@@ -89,8 +91,7 @@ class QueuedFileCache(object):
         if os.path.exists(metadata_filename):
 
             # TODO [matthew.mccallum 05.26.18] There should be some checking for cache integrity here, e.g.:
-            # - Files currently in the cache match one of the cache groups
-            # - Cache groups match all filenames
+            # - Files currently in the cache match the urls provided
             # - File sizes are correct
             # - Cache directories are correct
 
@@ -114,14 +115,14 @@ class QueuedFileCache(object):
 
             # Load the starting cache.
             this_size = 0
-            while (this_size + self._uncached_files[0].size < self._cache_size) and len(self._uncached_files):
+            while len(self._uncached_files) and (this_size + self._uncached_files[0].size < self._cache_size):
                 filename = self._uncached_files[0]
                 copy_url(filename.fname, self._local_fname(filename.fname, self._cache_dir))
                 self._current_cache.append(self._uncached_files.popleft())
                 this_size += self._current_cache[-1].size
 
-        # Prepare the next cache.
-        # NOTE [matt.c.mccallum 08.02.18]: Do we need to store this thread object? Will it get deallocated?
+        # Save state and prepare the next cache.
+        self.SaveState()
         self.Start()
 
     def SaveState(self):
@@ -129,12 +130,14 @@ class QueuedFileCache(object):
         Saves the current state of the cache to file, in case it needs to be used next time - to prevent having 
         to prefill the cache a second time.
         """
+        self._next_cache_lock.acquire()
         metadata = {
             '_current_cache': list(self._current_cache),
             '_used_cache': list(self._used_cache),
             '_uncached_files': list(self._uncached_files),
             '_next_cache_update': list(self._next_cache_update)
         }
+        self._next_cache_lock.release()
         with open(os.path.join(self._cache_dir, self._CACHE_METADATA_FNAME), 'wb') as metadata_file:
             pickle.dump(metadata, metadata_file, pickle.HIGHEST_PROTOCOL)
 
@@ -224,10 +227,10 @@ class QueuedFileCache(object):
             for i in range(len(arg)):
                 assert arg[i] == self._uncached_files[0].fname    # <= Check we are only popping files that we expect to come back from the copy.
                 self._next_cache_update.append(self._uncached_files.popleft())
+            self._next_cache_lock.release()
 
             # Update the cache state on disk so we may continue next time.
             self.SaveState()
-            self._next_cache_lock.release()
 
             # If noone has stopped the cache, keep on going.
             if not self._stop_signal:
@@ -255,10 +258,17 @@ class QueuedFileCache(object):
         new_files = copy.copy(list(itertools.islice(self._uncached_files, 0, self._CACHE_BLOCK_SIZE)))
         # If there aren't any new files start over with the previously used files
         if not len(new_files):
-            self._uncached_files = self._used_cache
-            self._used_cache = collections.deque()
-            new_files = copy.copy(list(itertools.islice(self._uncached_files, 0, self._CACHE_BLOCK_SIZE)))
+            # Check if there is any 'used_cache' before trying to replace it - we may be able to fit everything on one machine!
+            if len(self._used_cache):
+                self._uncached_files = self._used_cache
+                self._used_cache = collections.deque()
+                new_files = copy.copy(list(itertools.islice(self._uncached_files, 0, self._CACHE_BLOCK_SIZE)))
+            else:
+                new_files = []
         self._next_cache_lock.release()
+        # If there are no new files from the 'used' or 'uncached' cache, there is nothing more to cache, so return.
+        if not len(new_files):
+            return
 
         # Check if the current cache size can fit the new block, otherwise poll for cache space.
         # NOTE [matt.c.mccallum 08.02.18]: Important to do this size checking outside of the cache lock
@@ -325,6 +335,4 @@ class QueuedFileCache(object):
         print("Removed " + str(removed_file_count) + " files from cache.")
 
         # We have just updated the cache. This is a good time to save state.
-        self._next_cache_lock.acquire()
         self.SaveState()
-        self._next_cache_lock.release()        
