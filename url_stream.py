@@ -8,6 +8,7 @@ Created by Matt C. McCallum
 
 # Third party imports
 import boto3
+from google.cloud import storage
 
 # Python standard library imports
 import os.path
@@ -211,9 +212,152 @@ class S3Writer(object):
         s3.upload_fileobj(self._data, self._s3_bucket, self._s3_key)
 
 
+class GSScheme(URLScheme):
+    """
+    A URLScheme defining operations for reading from or writing to Google Cloud Storage.
+    """
+
+    TYPE = "gs"
+
+    def __init__(self, url):
+        """
+        Constructor.
+
+        Args:
+            url: str - The absolute url path with any scheme, network location etc. defined.
+        """
+        super().__init__(url)
+        parsed = urlparse.urlparse(self._url)
+        self._gs_name = parsed.path[1:]
+        self._gs_bucket_name = parsed.netloc
+
+    def _get_bucket(self, bucket_name):
+        """
+        Gets a GCS Bucket object for a given bucket name. If the bucket does not already exist in GCS,
+        it is created.
+        
+        Args:
+            bucket_name: str -> A string describing the bucket name.
+        """
+        storage_client = storage.Client()
+        # Check if bucket exists first
+        bucket = storage_client.lookup_bucket(bucket_name)
+        # Create bucket if it doesn't exist
+        if bucket is None:
+            bucket = storage_client.bucket(bucket_name)
+            bucket.storage_class = "REGIONAL"
+            bucket.create(location='us-central1')
+        return bucket
+
+    def GetStream(self, permission):
+        """
+        Gets an context manager type object that can be read from or written to depending
+        on the permissions. This specifically will read from or write to an s3 location.
+
+        Note: This is intended to be used exclusively with context managers.
+
+        Args:
+            permission - str - A permission specifying either binary reading from or writing
+            to an s3 location. Currently only binary reads and writes are supported.
+        """
+        self._bucket = self._get_bucket(self._gs_bucket_name)
+        if permission == 'rb':
+            blob = self._bucket.get_blob(self._gs_name)
+            data = io.BytesIO()
+            if blob:
+                blob.download_to_file(data)
+            data.seek(0)
+            return data
+        elif permission == 'wb':
+            return GSWriter(self._bucket, self._gs_name)
+        else:
+            raise TypeError('Incorrect permission for s3 file')
+
+    def GetSize(self):
+        """
+        Gets the size of the file this scheme object refers to, in bytes.
+
+        Return:
+            int - The size of the file this url points to.
+        """
+        raise NotImplementedError
+
+
+class GSWriter(object):
+    """
+    A context managed Google Cloud Storage (GCS) file handle type object that may be written to.
+    Thereby writing to a blob in GCS.
+
+    Currently, the file is prepared in memory in a bytes IO stream and then uploaded
+    to GCS on the exit of the context.
+    This provides only one write call, but has its limitations due to RAM availability.
+    """
+
+    def __init__(self, bucket, name):
+        """
+        Constructor.
+        
+        Args:
+            bucket -> str - Name of the AWS S3 Bucket.
+
+            key -> str - Essentially the S3 path and filename.
+        """
+        self._gs_bucket = bucket
+        self._gs_name = name
+    
+    def write(self, data):
+        """
+        Write to the in memory data buffer in preparation for writing to S3.
+        Note this adheres to the file write interface and can be used in place
+        of files, for example as an argument to pickle.dump(...).
+
+        Args:
+            data -> Bytes - A bytes object containing the data to write to S3.
+        """
+        self._data.write(data)
+
+    def __enter__(self):
+        """
+        Start the context. This simply opens an empty byte stream and returns itself
+        for writing to.
+
+        Return:
+            S3Writer - This object, for writing to.
+        """
+        self._data = io.BytesIO()
+        return self
+
+    def __exit__(self, *exc):
+        """
+        Close the context - That is, upload to S3.
+
+        Args:
+            exc -> tuple(type, value, traceback) - Any excpetion that occured during the
+            context. Currently this is not handled in any way.
+        """
+        self._data.seek(0)
+        self._upload_blob(self._gs_bucket, self._data.getvalue(), self._gs_name)
+
+    def _upload_blob(self, bucket, data, destination_blob_name):
+        """
+        Uploads a file to the provided GCS bucket under the provided blob name.
+
+        Args:
+            bucket: google.cloud.storage.bucket.Bucket -> A bucket to upload the data to.
+
+            data: Bytes or String -> The data to be uploaded to GCS.
+
+            destination_blob_name: String -> The name of the blob to store the data under
+            in the GCS bucket.
+        """
+        blob = bucket.blob(destination_blob_name)
+        blob.upload_from_string(data)
+
+
 _schemes = [
     FileScheme,
-    S3Scheme
+    S3Scheme,
+    GSScheme
 ]
 
 
